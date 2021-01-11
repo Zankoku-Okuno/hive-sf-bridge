@@ -2,7 +2,7 @@
   "name": "Salesforce Integration",
   "version": "0.1",
   "author": "Layer 3 Communications",
-  "url": "https://github.com/layer-3-communications/ytterby",
+  "url": "https://github.com/layer-3-communications/hive-sf-bridge",
   "license": "BSD-3-Clause",
   "description": "Create a case in Salesforce from within The Hive",
   "dataTypeList": ["thehive:case"],
