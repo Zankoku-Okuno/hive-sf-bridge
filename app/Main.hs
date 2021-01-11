@@ -15,7 +15,6 @@ import qualified Data.HashMap.Strict as HMap
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as LT
 import qualified Data.Text.Lazy.Encoding as LT
-import qualified Data.Text.Lazy.IO as LT
 import qualified Network.HTTP.Client as Http
 import qualified Salesforce.Client as Sf
 import qualified TheHive.CortexUtils as Hive
@@ -40,8 +39,11 @@ main = Hive.main Nothing $ \(Hive.Case input) -> do
           ]
   sfManager <- Sf.newManager config
                 <&> \x -> x{Sf.prettyPrint=True} -- DEBUG
-  it <- Sf.post sfManager "sobjects/Case" newCase
-  LT.putStrLn . LT.decodeUtf8 . Http.responseBody $ it -- DEBUG
+  response <- Sf.post sfManager "sobjects/Case" newCase
+  sfId <- maybe (error "unexpected salesforce reply") pure $ do
+    obj <- Json.decode @Json.Object (Http.responseBody response)
+    HMap.lookup "id" obj >>= fromText
+  pure . Right $ "Salesforce case ID is: " <> sfId
 
 fromObject :: Json.Value -> Maybe (HMap.HashMap Text Json.Value)
 fromObject (Json.Object obj) = Just obj
