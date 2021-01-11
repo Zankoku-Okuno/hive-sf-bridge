@@ -1,0 +1,49 @@
+{
+  "name": "Salesforce Integration",
+  "version": "0.1",
+  "author": "Layer 3 Communications",
+  "url": "https://github.com/layer-3-communications/ytterby",
+  "license": "BSD-3-Clause",
+  "description": "Create a case in Salesforce from within The Hive",
+  "dataTypeList": ["thehive:case"],
+  "command": "Mailer/mailer.py",
+  "baseConfig": "SalesforceIntegration",
+  "configurationItems": [
+    {
+      "name": "endpoint",
+      "description": "domain name for the salesforce api",
+      "type": "string",
+      "multi": false,
+      "required": true,
+      "defaultValue": "layer3.my.salesforce.com"
+    },
+    {
+      "name": "client_id",
+      "description": "id number for the connected app in Salesforce",
+      "type": "string",
+      "multi": false,
+      "required": true,
+    },
+    {
+      "name": "client_secret",
+      "description": "secret for the connected Salesforce app",
+      "type": "string",
+      "multi": false,
+      "required": true
+    },
+    {
+      "name": "username",
+      "description": "Salesforce username",
+      "type": "string",
+      "multi": false,
+      "required": true
+    },
+    {
+      "name": "password",
+      "description": "Salesforce password",
+      "type": "string",
+      "multi": false,
+      "required": true
+    }
+  ]
+}
