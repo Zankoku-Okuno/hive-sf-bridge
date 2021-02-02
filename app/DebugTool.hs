@@ -26,10 +26,10 @@ main = do
   sfManager <- Sf.newManager Sf.Config{endpoint,clientId,clientSecret,username,password}
                 <&> \x -> x{Sf.prettyPrint=True}
   -- print (accessToken sfManager)
-  -- it <- get sfManager "sobjects/Case/describe"
+  -- it <- Sf.get sfManager "sobjects/Case/describe"
   -- someCase <- fromJust . Json.decode @Json.Value . (LT.encodeUtf8 . LT.pack) <$> getContents
   -- print someCase
   -- it <- Sf.post sfManager "sobjects/Case" someCase
-  it <- Sf.get sfManager "sobjects/Case/5004p00000IGXLvAAP"
+  it <- Sf.get sfManager "sobjects/Case/5004p00000HDgNVAA1"
 
   LT.putStrLn . LT.decodeUtf8 . Http.responseBody $ it

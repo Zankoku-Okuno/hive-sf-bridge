@@ -1,0 +1,6 @@
+packages: .
+
+source-repository-package
+    type: git
+    location: ssh://git@github.com/layer-3-communications/allsight-email
+    tag: 8bda696c776f44d017b33e4c0975a4831f3a696e

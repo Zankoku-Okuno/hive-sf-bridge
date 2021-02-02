@@ -37,16 +37,21 @@ library
 executable hive-sf-bridge
   hs-source-dirs: app
   main-is: Main.hs
-  -- other-modules:
+  other-modules:
+    Marshall
   build-depends:
     , aeson
+    , allsight-email
     , base
     , bytestring
+    , hive-sf-bridge
     , http-client
+    , lucid >=2.9
+    , optparse-applicative >=0.16
     , scientific >=0.3.6
     , text
+    , text-short >=0.1
     , unordered-containers
-    , hive-sf-bridge
   default-language: Haskell2010
   ghc-options: -Wall -O2 -threaded
 

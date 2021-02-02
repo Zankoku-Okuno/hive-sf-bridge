@@ -9,13 +9,14 @@ module TheHive.CortexUtils
   , Value(..)
   ) where
 
+import Control.Exception (SomeException,catch)
 import Data.Aeson (FromJSON(..), withObject, (.:))
 import Data.Functor ((<&>))
-import System.Directory (doesFileExist)
-import System.Environment (getArgs)
-import System.FilePath ((</>))
 import Data.Text (Text)
-import Control.Exception (SomeException,catch)
+import System.Directory (createDirectoryIfMissing, doesFileExist)
+import System.Environment (getArgs)
+import System.Exit (exitFailure)
+import System.FilePath ((</>))
 
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Text as T
@@ -38,10 +39,12 @@ main jobDirOverride action = do
         )
       , ("operations", Json.toJSON @[Json.Value] []) -- TODO
       ]
-    Left errmsg -> setOutput jobDir $ HMap.fromList $
-      [ ("success", Json.toJSON False)
-      , ("message", Json.toJSON errmsg)
-      ]
+    Left errmsg -> do
+      setOutput jobDir $ HMap.fromList $
+        [ ("success", Json.toJSON False)
+        , ("message", Json.toJSON errmsg)
+        ]
+      exitFailure
   where
   getJobDir :: IO (Maybe FilePath)
   getJobDir = do
