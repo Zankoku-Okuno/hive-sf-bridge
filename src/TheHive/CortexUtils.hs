@@ -1,9 +1,9 @@
--- a Haskell-idomatic port of https://github.com/TheHive-Project/cortexutils
-
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
+-- a Haskell-idomatic port of https://github.com/TheHive-Project/cortexutils
 module TheHive.CortexUtils
   ( main
   , Value(..)
@@ -71,11 +71,17 @@ main jobDirOverride action = do
 
 data Value
   = Case
-    { allTheCrap :: Json.Object
+    { config :: Json.Value
+    , payload :: Json.Value
+    , allTheCrap :: Json.Object-- FIXME delete
     }
 
 instance FromJSON Value where
   parseJSON = withObject "Hive.Value" $ \v ->
     v .: "dataType" >>= \case
-      "thehive:case" -> pure $ Case v
+      "thehive:case" -> do
+        config <- v .: "config"
+        payload <- v.: "data"
+        let allTheCrap = v
+        pure $ Case{config,payload,allTheCrap}
       other -> fail $ "unexpected dataType: " ++ other
