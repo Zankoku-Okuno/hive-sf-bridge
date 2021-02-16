@@ -7,30 +7,35 @@
 module TheHive.CortexUtils
   ( main
   , Value(..)
+  , Case(..)
   ) where
 
 import Control.Exception (SomeException,catch)
-import Data.Aeson (FromJSON(..), withObject, (.:))
 import Data.Functor ((<&>))
 import Data.Text (Text)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
+import TheHive.Types (Value(..), ResponderConfig, Case(..))
 
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Text as T
 import qualified Data.Aeson as Json
 import qualified Data.ByteString.Lazy as LBS
 
-main :: Maybe FilePath -> (Value -> IO (Either Text Text)) -> IO ()
+main :: Maybe FilePath -> (Value -> ResponderConfig -> IO (Either Text Text)) -> IO ()
 main jobDirOverride action = do
   jobDir <- getJobDir
-  input <- Json.decode @Value <$> getInput jobDir >>= \case
-    Nothing -> error "json parse failed"
-    Just it -> pure it
+  input <- getInput jobDir
+  value <- case Json.eitherDecode @Value input of
+    Left err -> error $ "bad input: " ++ err
+    Right it -> pure it
+  config <- case Json.eitherDecode @ResponderConfig input of
+    Left err -> error $ "bad input: " ++ err
+    Right it -> pure it
   -- TODO check tlp and pap, whatever they are
-  action input `catch` showAllExns >>= \case
+  action value config `catch` showAllExns >>= \case
     Right msg -> setOutput jobDir $ HMap.fromList $
       [ ("success", Json.toJSON True)
       , ("full", Json.Object $ HMap.fromList
@@ -66,22 +71,4 @@ main jobDirOverride action = do
     LBS.writeFile (jobDir </> "output/output.json") (Json.encode out)
   setOutput Nothing out = LBS.putStr (Json.encode out)
   showAllExns :: SomeException -> IO (Either Text a)
-  showAllExns = pure . Left . T.pack . show 
-
-
-data Value
-  = Case
-    { config :: Json.Value
-    , payload :: Json.Value
-    , allTheCrap :: Json.Object-- FIXME delete
-    }
-
-instance FromJSON Value where
-  parseJSON = withObject "Hive.Value" $ \v ->
-    v .: "dataType" >>= \case
-      "thehive:case" -> do
-        config <- v .: "config"
-        payload <- v.: "data"
-        let allTheCrap = v
-        pure $ Case{config,payload,allTheCrap}
-      other -> fail $ "unexpected dataType: " ++ other
+  showAllExns = pure . Left . T.pack . show
