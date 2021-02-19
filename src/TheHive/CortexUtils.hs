@@ -1,16 +1,19 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeApplications #-}
 
 -- a Haskell-idomatic port of https://github.com/TheHive-Project/cortexutils
 module TheHive.CortexUtils
-  ( main
+  ( Responder
+  , main
   , Value(..)
   , Case(..)
   ) where
 
 import Control.Exception (SomeException,catch)
+import Data.Aeson (FromJSON)
 import Data.Functor ((<&>))
 import Data.Text (Text)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
@@ -19,16 +22,23 @@ import System.Exit (exitFailure)
 import System.FilePath ((</>))
 import TheHive.Types (Value(..), ResponderConfig, Case(..))
 
+
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.Text as T
 import qualified Data.Aeson as Json
 import qualified Data.ByteString.Lazy as LBS
 
-main :: Maybe FilePath -> (Value -> ResponderConfig -> IO (Either Text Text)) -> IO ()
+type Responder customFields
+  =  Value customFields
+  -> ResponderConfig
+  -> IO (Either Text Text)
+
+main :: forall customFields. (FromJSON customFields) =>
+  Maybe FilePath -> Responder customFields -> IO ()
 main jobDirOverride action = do
   jobDir <- getJobDir
   input <- getInput jobDir
-  value <- case Json.eitherDecode @Value input of
+  value <- case Json.eitherDecode @(Value customFields) input of
     Left err -> error $ "bad input: " ++ err
     Right it -> pure it
   config <- case Json.eitherDecode @ResponderConfig input of

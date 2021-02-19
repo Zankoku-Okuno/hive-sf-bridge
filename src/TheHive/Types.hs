@@ -18,10 +18,10 @@ import qualified Data.Aeson as Json
 import qualified Chronos as Chronos
 
 
-data Value
-  = CaseVal Case
+data Value caseCustom
+  = CaseVal (Case caseCustom)
 
-instance FromJSON Value where
+instance (FromJSON caseCustom) => FromJSON (Value caseCustom) where
   parseJSON  = withObject "Hive.Value" $ \v ->
     v .: "dataType" >>= \case
       "thehive:case" -> do
@@ -39,12 +39,12 @@ instance FromJSON ResponderConfig where
       { allTheCrap = config
       }
 
-data Alert = Alert
+data Alert custom = Alert
   { sourceRef :: Text
-  , customFields :: Json.Value
+  , customFields :: custom
   }
 
-instance FromJSON Alert where
+instance (FromJSON custom) => FromJSON (Alert custom) where
   parseJSON = withObject "Hive.Alert" $ \v -> do
     sourceRef <- v .: "sourceRef"
     customFields <- v .: "customFields"
@@ -53,17 +53,16 @@ instance FromJSON Alert where
       , customFields
       }
 
-data Case = Case
+data Case custom = Case
   { hiveId :: Text
   , caseNum :: Int
   , createdTime :: Chronos.Time
   , title :: Text
   , severity :: Int
-  , customFields :: Json.Value
-  , theData :: Json.Value -- FIXME delete
+  , customFields :: custom
   }
 
-instance FromJSON Case where
+instance (FromJSON custom) => FromJSON (Case custom) where
   parseJSON = withObject "Hive.Case" $ \v -> do
     hiveId <- v .: "id"
     caseNum <- v .: "caseId"
@@ -78,5 +77,4 @@ instance FromJSON Case where
       , title
       , severity
       , customFields
-      , theData=Json.Object v
       }

@@ -30,6 +30,6 @@ main = do
   -- someCase <- fromJust . Json.decode @Json.Value . (LT.encodeUtf8 . LT.pack) <$> getContents
   -- print someCase
   -- it <- Sf.post sfManager "sobjects/Case" someCase
-  it <- Sf.get sfManager "sobjects/Case/5004p00000IzrzoAAB"
+  it <- Sf.get sfManager "sobjects/Case/5004p00000IHNyQAAX"
 
   LT.putStrLn . LT.decodeUtf8 . Http.responseBody $ it

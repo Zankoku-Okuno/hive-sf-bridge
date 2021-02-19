@@ -12,13 +12,14 @@ import Prelude hiding (id)
 import Allsight.Notification (Notification(..), Customer(..))
 import Control.Applicative ((<**>))
 import Control.Monad (when, forM)
-import Data.Aeson (parseJSON, toJSON, withObject, (.:))
+import Data.Aeson (toJSON)
 import Data.Functor ((<&>))
 import System.Exit (exitSuccess)
 
 import qualified Data.Aeson as Json
 import qualified Data.Aeson.Types as Json
 import qualified Data.ByteString.Lazy.Char8 as LBS
+import qualified Data.List as List
 import qualified Data.Text as T
 import qualified Elasticsearch.Client as ES
 import qualified Marshall
@@ -29,14 +30,21 @@ import qualified TheHive.Client as Hive
 import qualified TheHive.CortexUtils as Hive
 import qualified TheHive.Types as Hive
 
+fromJsonOrDie :: forall a. (Json.FromJSON a) => String -> Json.Value -> IO a
+fromJsonOrDie errPrefix inp =
+  either (error . ((errPrefix ++ ": ") ++)) pure $
+    Json.parseEither Json.parseJSON inp
+decodeJsonOrDie :: forall a. (Json.FromJSON a) => String -> LBS.ByteString -> IO a
+decodeJsonOrDie errPrefix inp =
+  either (error . ((errPrefix ++ ": ") ++)) pure $
+    Json.eitherDecode inp
 
 main :: IO ()
 main = Hive.main Nothing $ \(Hive.CaseVal hiveCase) (Hive.ResponderConfig rconfig) -> do
+  -- parse configuration from TheHive
+  conf <- fromJsonOrDie @Marshall.Config "bad config from TheHive" rconfig
   -- parse options
   Settings{customersFile,notificationsFile,dryRun} <- Options.execParser programOptions
-  -- load Hive input
-  alert <- either (error . ("bad Hive input for alertFromHive: " <>)) pure $
-    Json.parseEither Marshall.alertFromHive (Hive.theData hiveCase)
   -- load databases
   customers <- Json.eitherDecodeFileStrict' customersFile >>= \case
     Left err -> fail ("While decoding customers JSON: " ++ err)
@@ -44,11 +52,9 @@ main = Hive.main Nothing $ \(Hive.CaseVal hiveCase) (Hive.ResponderConfig rconfi
   notifications <- Json.eitherDecodeFileStrict' notificationsFile >>= \case
     Left err -> fail ("While decoding notifications JSON: " ++ err)
     Right v -> pure (v :: [Notification])
-  -- gather relevant data from hive and elastic
-  hiveConfig <- either (error . ("invalid Hive input: " <>)) pure $
-    flip Json.parseEither rconfig
-    Marshall.hiveConfigFromHive
-  hiveManager <- Hive.newManager hiveConfig
+
+  -- accumulate alert and incident data
+  hiveManager <- Hive.newManager (Marshall.hive conf)
   let alertsUrl = "/api/v1/query?name=get-case-alerts" ++ T.unpack (Hive.hiveId hiveCase)
   alertsResponse <- Hive.post hiveManager alertsUrl $ Json.object
     [ ("query", toJSON
@@ -62,36 +68,34 @@ main = Hive.main Nothing $ \(Hive.CaseVal hiveCase) (Hive.ResponderConfig rconfi
         ]
       )
     ]
-  hiveAlerts <- either (error . ("bad alerts query from Hive: " <>)) pure $
-    Json.eitherDecode @[Hive.Alert] (Http.responseBody alertsResponse)
-  esConfig <- either (error . ("invalid Hive input: " <>)) pure $
-    flip Json.parseEither rconfig
-    Marshall.esConfigFromHive
-  esManager <- ES.newManager esConfig
-  preEsIncidents <- forM hiveAlerts $ \Hive.Alert{sourceRef,customFields} -> do
-    (cust, date) <- either (error . ("bad Hive alert: " <>)) pure $
-      Json.parseEither Marshall.alertCustomFields customFields
-    let esUrl = concat ["/store-", cust, "-", date, "d/_doc/", T.unpack sourceRef]
+  hiveAlerts <- decodeJsonOrDie @[Hive.Alert Marshall.AlertCustomFields]
+    "bad alerts from TheHive" (Http.responseBody alertsResponse)
+  customer <- case hiveAlerts of
+    [] -> error "no alerts associated with case"
+    (Hive.Alert{customFields=Marshall.AlertCustomFields{customerId}} : _) -> do
+      case List.find (\Customer{id} -> id == customerId) customers of
+        Nothing -> error "responder does not recognize Hive case's customer id"
+        Just c -> pure c
+  let Customer{id=customerId} = customer
+  esManager <- ES.newManager (Marshall.es conf)
+  esIncidents <- forM hiveAlerts $ \Hive.Alert{sourceRef,customFields} -> do
+    let date = Marshall.date customFields
+    let esUrl = concat ["/store-", show customerId, "-", date, "d/_doc/", T.unpack sourceRef]
     esResponse <- ES.get esManager esUrl
-    esJson <- either (error . ("bad ES incident response:" <>)) pure $
-      Json.eitherDecode @Json.Value (Http.responseBody esResponse)
-    pure (read cust, esJson)
-  let esIncidents = snd <$> preEsIncidents
-      custId = fst $ head preEsIncidents
+    esJson <- decodeJsonOrDie @Json.Value
+      "bad ES incident response" (Http.responseBody esResponse)
+    pure esJson
   -- when (dryRun) $ do -- DEBUG
   --   LBS.putStrLn $ Json.encode $ toJSON esIncidents
   --   exitSuccess
 
   -- marshall information into salesforce-expected Json
-  let newCase = Marshall.sfCaseFromHive customers hiveCase (custId, esIncidents)
+  let newCase = Marshall.sfCaseFromHive customer hiveCase esIncidents
   when (dryRun) $ do
     LBS.putStrLn $ Json.encode newCase
     exitSuccess
   -- talk to SalesForce
-  sfConfig <- either (error . ("invalid Hive input: " <>)) pure $
-    flip Json.parseEither rconfig
-    Marshall.sfConfigFromHive
-  sfManager <- Sf.newManager sfConfig
+  sfManager <- Sf.newManager (Marshall.sf conf)
                 <&> \x -> x{Sf.prettyPrint=True} -- DEBUG
   response <- Sf.post sfManager "sobjects/Case" newCase
   let theError = "unexpected salesforce reply:\n" <> (show $ Http.responseBody response)

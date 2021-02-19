@@ -1,19 +1,17 @@
 {-# LANGUAGE DuplicateRecordFields #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE ViewPatterns #-}
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Marshall
-  ( alertFromHive
-  , alertCustomFields
-  , allTheCustomFields
-  , esConfigFromHive
-  , hiveConfigFromHive
-  , sfConfigFromHive
+  ( Config(..)
+  , AlertCustomFields(..)
   , sfCaseFromHive
   , SfId(..)
   ) where
@@ -23,161 +21,239 @@ import Prelude hiding (id)
 
 import Allsight.Email.Data (Action(..), Alert(..))
 import Allsight.Notification (Notification(..), Customer(..))
+import Chronos (Offset(..),SubsecondPrecision(..))
 import Control.Monad (forM,forM_)
-import Data.Aeson (toJSON, withObject, (.:))
+import Data.Aeson (FromJSON(..), toJSON, withObject, (.:))
+import Data.Foldable (toList)
 import Data.Int (Int64)
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text.Short (ShortText)
 import TheHive.CortexUtils (Case(..))
 
+import qualified Chronos
+import qualified Chronos.Locale.English as EN
 import qualified Data.Aeson as Json
 import qualified Data.Aeson.Types as Json
 import qualified Data.HashMap.Strict as HMap
 import qualified Data.List as List
+import qualified Data.Scientific as Sci
 import qualified Data.Text as T
+import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Short as TS
 import qualified Elasticsearch.Client as ES
-import qualified RichText
 import qualified Salesforce.Client as SF
 import qualified TheHive.Client as Hive
 import qualified TheHive.CortexUtils as Hive
 
-alertCustomFields :: Json.Value -> Json.Parser (String, String)
-alertCustomFields customFields = do
-  fields <- Json.parseJSON @[Json.Value] customFields
-  adapted <- (Json.object <$>) $ forM fields $ withObject "customField" $ \v -> do
-    name <- v .: "name"
-    value <- v .: "value"
-    pure (name :: Text, value :: Json.Value)
-  flip (withObject "customFields") adapted $ \v -> do
-    cust <- v .: "customer"
-    timestamp <- v .: "timestamp"
-    pure (cust, takeWhile (/= 'T') timestamp)
 
-sfConfigFromHive :: Json.Value -> Json.Parser SF.Config
-sfConfigFromHive = withObject "config" $ \config -> do
-  endpoint <-  config .: "sf_endpoint"
-  clientId <- config .: "sf_clientId"
-  clientSecret <- config .: "sf_clientSecret"
-  username <- config .: "sf_username"
-  password <- config .: "sf_password"
-  pure SF.Config{endpoint,clientId,clientSecret,username,password}
+data Config = Config
+  { hive :: Hive.Config
+  , es :: ES.Config
+  , sf :: SF.Config
+  }
+instance FromJSON Config where
+  parseJSON = withObject "Hive config" $ \v -> do
+    hive <- do
+      endpoint <- v .: "hive_endpoint"
+      apikey <- v .: "hive_apikey"
+      pure Hive.Config{endpoint,apikey}
+    es <- do
+      endpoint <- v .: "es_endpoint"
+      username <- v .: "es_username"
+      password <- v .: "es_password"
+      pure ES.Config{endpoint,username,password}
+    sf <- do
+      endpoint <-  v .: "sf_endpoint"
+      clientId <- v .: "sf_clientId"
+      clientSecret <- v .: "sf_clientSecret"
+      username <- v .: "sf_username"
+      password <- v .: "sf_password"
+      pure SF.Config{endpoint,clientId,clientSecret,username,password}
+    pure Config{hive,es,sf}
 
-esConfigFromHive :: Json.Value -> Json.Parser ES.Config
-esConfigFromHive = withObject "config" $ \config -> do
-  endpoint <- config .: "es_endpoint"
-  username <- config .: "es_username"
-  password <- config .: "es_password"
-  pure ES.Config{endpoint,username,password}
+-- data Data = Data
+--   { hiveData :: Hive.Case
+--   , customerData :: Customer
+--   , notificationData :: Notification
+--   , esData :: Json.Value
+--   }
 
-hiveConfigFromHive :: Json.Value -> Json.Parser Hive.Config
-hiveConfigFromHive = withObject "config" $ \config -> do
-  endpoint <- config .: "hive_endpoint"
-  apikey <- config .: "hive_apikey"
-  pure Hive.Config{endpoint,apikey}
+data AlertCustomFields = AlertCustomFields
+  { customerId :: Int64
+  , date :: String
+  }
+instance FromJSON AlertCustomFields where
+  parseJSON = Json.withArray "Alert.customFields" $ \(toList -> fields) -> do
+    adapted <- (Json.object <$>) $ forM fields $ withObject "customField" $ \v -> do
+      name <- v .: "name"
+      value <- v .: "value"
+      pure (name :: Text, value :: Json.Value)
+    flip (withObject "Alert.customFields") adapted $ \v -> do
+      customerId <- v .: "customer"
+      timestamp <- v .: "timestamp"
+      pure AlertCustomFields
+        { customerId
+        , date = takeWhile (/= 'T') timestamp
+        }
 
-
--- takes only the data field of the Hive input
-alertFromHive :: Json.Value -> Json.Parser Alert
-alertFromHive = withObject "case data" $ \v -> do
-  created <- v .: "createdAt"
-  ruleName <- TS.fromText <$> v .: "title"
-  ruleDescription <- v .: "description"
-  customFields <- v .: "customFields" >>= withObject "custom fields" pure
-  let recordsHtml = mkRecordsHtml customFields
-  severity <- v .: "severity"
-  let customer = 3000 -- TODO
-      ruleId = 1106 -- TODO
-      traceIdentifier = 0 -- TODO
-  pure Alert
-    { action = Create
-    , traceIdentifier
-    , created
-    , ruleName
-    , ruleDescription
-    , recordsHtml
-    , customer
-    , severity
-    , ruleId
-    }
+-- -- takes only the data field of the Hive input
+-- alertFromHive :: Json.Value -> Json.Parser Alert
+-- alertFromHive = withObject "case data" $ \v -> do
+--   created <- v .: "createdAt"
+--   ruleName <- TS.fromText <$> v .: "title"
+--   ruleDescription <- v .: "description"
+--   customFields <- v .: "customFields" >>= withObject "custom fields" pure
+--   let recordsHtml = mkRecordsHtml customFields
+--   severity <- v .: "severity"
+--   let customer = 3000 -- TODO
+--       ruleId = 1106 -- TODO
+--       traceIdentifier = 0 -- TODO
+--   pure Alert
+--     { action = Create
+--     , traceIdentifier
+--     , created
+--     , ruleName
+--     , ruleDescription
+--     , recordsHtml
+--     , customer
+--     , severity
+--     , ruleId
+--     }
 
 -- FIXME move the rule name cleaning functionality out of elastirec
 
-mkRecordsHtml :: Json.Object -> Html ()
-mkRecordsHtml obj = forM_ (List.sort $ HMap.keys obj) $ \k -> do
-  case HMap.lookup k obj of
-    Just (Json.Number 0) -> pure ()
-    Just (Json.Number n) -> do
-      strong_ $ toHtml k >> ": "
-      toHtml $ show n
-      br_ []
-    Just (Json.String str) -> do
-      strong_ $ toHtml k >> ": "
-      toHtml str
-      br_ []
-    _ -> pure ()
-
-sfCaseFromHive :: [Customer] -> Hive.Case -> (Int64, [Json.Value]) -> Json.Value
+sfCaseFromHive :: Customer -> Hive.Case Json.Value -> [Json.Value] -> Json.Value
 sfCaseFromHive
-    customers
-    (hiveCase@Case{caseNum,hiveId})
-    (custId, esData)
+    cust
+    hiveCase@Case{caseNum,hiveId,severity}
+    esData
   = Json.object
-  $ standardStuff ++ emailStuff
-  where
-  humanName = "TODO some rule name" -- TODO cleanRuleName notifications alert
-  standardStuff =
     [ ("Subject", toJSON $ "Hive Case " ++ show caseNum)
     , ("Hive_Case__c", toJSON hiveLink)
     , ("Origin", "Layer 3 Alert")
-    , ("RecordTypeId", Json.String "0124p000000V5n5AAC")
-    -- , ("Security_Incident_Name__c", toJSON $ humanName) -- TODO
-    -- , ("Security__c", toJSON $ ruleId alert) -- TODO
-    -- TODO: email field
+    , ("RecordTypeId", toJSON @Text "0124p000000V5n5AAC")
+    , ("Security_Incident_Name__c", toJSON humanName)
+    , ("Security__c", toJSON ruleId) -- TODO do we still want to use this id?
+    , ("Security_Incident_Severity__c", toJSON severity)
+    -- TODO: email subject?
+    , ("Security_Alert_Attributes__c", toJSON $
+        mkBody cust hiveCase esData humanName
+      )
+    , ("Security_Incident_UUID__c", toJSON traceId)
+    , ("Description", toJSON $ aggregateDescription esData)
     ]
-  emailStuff = case List.find (\Customer{id} -> id == custId) customers of
-    Nothing -> []
-    Just cust ->
-      [ ("Security_Alert_Attributes__c", toJSON $ RichText.mkBody cust hiveCase esData humanName)
-      ]
-  hiveLink = "https://hive.noc.layer3com.com/index.html#!/case/~" <> hiveId <> "/details"
-
-sfCaseFromHiveOld :: Alert -> ([Customer], [Notification]) -> Json.Value -> Json.Parser Json.Value
-sfCaseFromHiveOld alert (customers, notifications) = withObject "data" $ \theData -> do
-  (hiveCaseId :: Int) <- theData .: "caseId"
-  hiveGuiId <- theData .: "id"
-  customFields <- theData .: "customFields"
-  let humanName = cleanRuleName notifications alert
-      emailStuff = case List.find (\Customer{id} -> id == customer alert) customers of
-        Nothing -> []
-        Just cust ->
-          [ ("Security_Alert_Attributes__c", toJSON $ RichText.mkBodyOld cust alert notifications humanName)
-          ]
-  pure $ Json.object $
-    [ ("Subject", toJSON $ "Hive Case " ++ show hiveCaseId)
-    , ("RecordTypeId", Json.String "0124p000000V5n5AAC")
-    , ("Security_Incident_Name__c", toJSON $ humanName)
-    , ("Security__c", toJSON $ ruleId alert)
-    , ("Hive_Case__c", toJSON $ "https://hive.noc.layer3com.com/index.html#!/case/~"<>T.pack hiveGuiId<>"/details")
-    , ("Origin", "Layer 3 Alert")
-    ]
-    ++ HMap.toList (allTheCustomFields customFields)
-    ++ emailStuff
-
--- input `customFields` from Hive, create fields for layer3 salesforce cases
-allTheCustomFields :: Json.Object -> Json.Object
-allTheCustomFields customFields = HMap.fromList $ catMaybes $ oneField <$>
-  [ ("incident.description", "Description")
-  , ("incident.severity", "Security_Incident_Severity__c")
-  , ("trace.id", "Security_Incident_UUID__c")
-  ]
   where
-  oneField :: (Text, Text) -> Maybe (Text, Json.Value)
-  oneField (hive, sf) = (sf,) <$> Json.parseMaybe (accessor hive) customFields
-  accessor :: Text -> Json.Object -> Json.Parser Json.Value
-  accessor field obj = obj .: field >>= withObject "custom field" (.: "string")
-  -- accessor (:fields) = withObject "" (\obj -> accessor fields =<< obj .: field)
+  humanName = "TODO some rule name" -- TODO cleanRuleName notifications alert
+  hiveLink = "https://hive.noc.layer3com.com/index.html#!/case/~" <> hiveId <> "/details"
+  ruleId = delve (head esData) ["_source", "incident", "id"]
+  traceId = delve (head esData) ["_source", "trace", "id"]
+
+
+aggregateDescription :: [Json.Value] -> Text
+aggregateDescription esData = T.intercalate "\n\n" $ List.nub . catMaybes $
+  flip map esData $ \esDatum ->
+    delve esDatum ["_source", "incident", "description"] >>= \case
+      Json.String str -> Just str
+      _ -> Nothing
+
+mkBody :: Customer -> Hive.Case Json.Value -> [Json.Value] -> Text -> TL.Text
+mkBody
+    Customer{name,kibanaIndexPattern}
+    hiveCase
+    esData
+    humanName = Lucid.renderText $ do
+  h2_ $ toHtml $
+    name <> " - Security Incident Report"
+  p_ $ toHtml $
+    Chronos.encode_YmdIMS_p EN.upper (SubsecondPrecisionFixed 0) Chronos.hyphen
+      (Chronos.offsetDatetimeDatetime
+        (Chronos.timeToOffsetDatetime (Offset (-300)) -- FIXME: customer offset
+        (Hive.createdTime hiveCase)))
+  p_ $ h2_ $ toHtml humanName
+  p_ $ toHtml $ aggregateDescription esData
+  -- p_ $ hyperlinkToTraceId traceIdentifier
+  -- case kibanaIndexPattern of
+  --   0 -> p_ $ hyperlinkToRelevant allEventsUuid created traceIdentifier
+  --   pat -> p_ $ hyperlinkToRelevant pat created traceIdentifier
+  h4_ [] "Attributes:"
+  forM_ esData $ \es -> do
+    details_ [] $ do
+      summary_ [] $ h5_ [] $ do
+        maybeM_ (delve es ["_source", "trace", "id"]) $ \case
+          Json.String str -> "Incident ID " <> toHtml str
+          _ -> "Incident ID not known"
+      dl_ [] $ do
+        esAttr es ["destination", "addresses"]
+        esAttr es ["destination", "ip"]
+        esAttr es ["destination", "ips"]
+        esAttr es ["destination", "ips_count"]
+        esAttr es ["destination", "port"]
+        esAttr es ["destination", "ports"]
+        esAttr es ["destination", "zones"]
+        esAttr es ["event", "action"]
+        esAttr es ["event", "category"]
+        esAttr es ["event", "created"]
+        esAttr es ["event", "dataset"]
+        esAttr es ["event", "end"]
+        esAttr es ["event", "id"]
+        esAttr es ["event", "kind"]
+        esAttr es ["event", "module"]
+        esAttr es ["event", "severity"]
+        esAttr es ["event", "start"]
+        esAttr es ["file", "md5s"]
+        esAttr es ["host", "names"]
+        esAttr es ["incident", "category"]
+        esAttr es ["incident", "description"]
+        esAttr es ["incident", "id"]
+        esAttr es ["incident", "name"]
+        esAttr es ["incident", "severity"]
+        esAttr es ["mitre-attack-technique"]
+        esAttr es ["network", "application"]
+        esAttr es ["network", "applications"]
+        esAttr es ["network", "direction"]
+        esAttr es ["network", "directions"]
+        esAttr es ["observer", "name"]
+        esAttr es ["observer", "product"]
+        esAttr es ["observer", "type"]
+        esAttr es ["observer", "vendor"]
+        esAttr es ["provenance", "event", "dataset"]
+        esAttr es ["provenance", "event", "module"]
+        esAttr es ["provenance", "observer", "product"]
+        esAttr es ["provenance", "observer", "vendor"]
+        esAttr es ["source", "addresses"]
+        esAttr es ["source", "ip"]
+        esAttr es ["source", "ips"]
+        esAttr es ["source", "ips_count"]
+        esAttr es ["source", "port"]
+        esAttr es ["source", "ports"]
+        esAttr es ["source", "user", "names"]
+        esAttr es ["source", "user", "names_count"]
+        esAttr es ["source", "zones"]
+        esAttr es ["trace", "id"]
+        esAttr es ["url", "domains"]
+        esAttr es ["url", "domains_count"]
+
+  -- case List.find (\(Notification{id}) -> id == ruleId) notifications of
+  --   Nothing -> pure ()
+  --   Just Notification{playbooks,suggestedActions,referenceLinks} -> p_ $ do
+  --     when (PM.sizeofArray playbooks /= 0) $ do
+  --       h4_ "Playbooks:"
+  --       forM_ playbooks $ \playbook -> do
+  --         p_ $ toHtml playbook
+  --     when (PM.sizeofArray suggestedActions /= 0) $ do
+  --       h4_ "Suggested Actions:"
+  --       forM_ suggestedActions $ \suggestedAction -> do
+  --         p_ $ toHtml suggestedAction
+  --     when (PM.sizeofArray referenceLinks /= 0) $ do
+  --       h4_ "References:"
+  --       forM_ referenceLinks $ \referenceLink -> do
+  --         p_ $ toHtml referenceLink
+  where
+  esAttr es path = do
+    maybeM_ (delve es ("_source":path)) $ jsonAsHtml (T.intercalate "." path)
+
+
 
 instance Json.FromJSON ShortText where
   parseJSON = (TS.fromText <$>) . Json.parseJSON
@@ -194,3 +270,28 @@ newtype SfId = SfId Text
 instance Json.FromJSON SfId where
   parseJSON = withObject "salesforce response" $ \v -> do
     v .: "id"
+
+maybeM_ :: (Monad m) => Maybe a -> (a -> m b) -> m ()
+maybeM_ Nothing _ = pure ()
+maybeM_ (Just a) f = f a >> pure ()
+
+jsonAsHtml :: Text -> Json.Value -> Html ()
+jsonAsHtml label = \case
+  Json.String str -> withLabel $ do
+    toHtml str
+  Json.Number 0 -> pure ()
+  Json.Number n -> case Sci.floatingOrInteger n of
+    Right i -> withLabel $ toHtml $ show @Int i
+    Left r -> withLabel $ toHtml $ show @Double r
+  _ -> undefined -- TODO
+  where
+  withLabel :: Html () -> Html ()
+  withLabel content = do
+    dt_ [] $ toHtml label
+    dd_ [] content
+
+delve :: Json.Value -> [Text] -> Maybe Json.Value
+delve v0 path0 =Json.parseMaybe (loop path0) v0
+  where
+  loop [] = pure
+  loop (prop:path) = withObject "" $ (loop path =<<) . (.: prop)
