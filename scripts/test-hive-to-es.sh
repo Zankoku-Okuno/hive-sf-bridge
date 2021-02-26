@@ -38,9 +38,10 @@ echo >&2 "hive case id: $case_hiveid"
 # search for alerts
 while read alert_hiveid; do
   alertjson="$(curl -k "https://$hiveDomain/api/alert/$alert_hiveid" -H "$hiveAuth")"
-  # echo "$alertjson" | jq -C . | less -R # DEBUG
-  urlpath="/store-$(echo "$alertjson" | jq -r .customFields.customer.string)-$(echo "$alertjson" | jq -r .customFields.timestamp.string | sed s/T.*$//)d/_doc/$(echo "$alertjson" | jq -r .sourceRef)"
-  urlpath="/store-3014-2021-02-18d/_doc/$(echo "$alertjson" | jq -r .sourceRef)" # DEBUG
+  # echo "$alertjson" ; exit 0 # DEBUG
+  custId="$(echo "$alertjson" | jq -r .customFields.customer.string)"
+  day="$(echo "$alertjson" | jq -r .customFields.timestamp.string | sed s/T.*$//)"
+  urlpath="/store-${custId}-${day}d/_doc/$(echo "$alertjson" | jq -r .sourceRef)"
   echo >&2 "urlpath: ${urlpath}"
   # for each one, get the info from ES
   curl -k "https://hive:${ES_PASS}@${esDomain}${urlpath}"

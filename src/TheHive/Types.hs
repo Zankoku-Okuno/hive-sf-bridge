@@ -1,6 +1,7 @@
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE TypeApplications #-}
 
@@ -66,7 +67,8 @@ instance (FromJSON custom) => FromJSON (Case custom) where
   parseJSON = withObject "Hive.Case" $ \v -> do
     hiveId <- v .: "id"
     caseNum <- v .: "caseId"
-    createdTime <- v .: "createdAt"
+    hiveTime <- v .: "createdAt"
+    let createdTime = Chronos.Time (hiveTime * 1_000_000) -- WARNING apparently I get number of milliseconds after epoch?
     title <- v .: "title"
     severity <- v .: "severity"
     customFields <- v .: "customFields"

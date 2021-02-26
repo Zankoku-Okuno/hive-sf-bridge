@@ -36,7 +36,7 @@ fromJsonOrDie errPrefix inp =
     Json.parseEither Json.parseJSON inp
 decodeJsonOrDie :: forall a. (Json.FromJSON a) => String -> LBS.ByteString -> IO a
 decodeJsonOrDie errPrefix inp =
-  either (error . ((errPrefix ++ ": ") ++)) pure $
+  either (\x -> error $ concat [errPrefix, ": ", x]) pure $
     Json.eitherDecode inp
 
 main :: IO ()

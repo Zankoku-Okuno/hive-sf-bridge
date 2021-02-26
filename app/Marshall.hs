@@ -18,6 +18,7 @@ module Marshall
 
 import Lucid
 import Prelude hiding (id)
+import qualified Prelude
 
 import Allsight.Email.Data (Action(..), Alert(..))
 import Allsight.Notification (Notification(..), Customer(..))
@@ -29,6 +30,7 @@ import Data.Int (Int64)
 import Data.Maybe (catMaybes)
 import Data.Text (Text)
 import Data.Text.Short (ShortText)
+import Text.Read (readMaybe)
 import TheHive.CortexUtils (Case(..))
 
 import qualified Chronos
@@ -90,7 +92,9 @@ instance FromJSON AlertCustomFields where
       value <- v .: "value"
       pure (name :: Text, value :: Json.Value)
     flip (withObject "Alert.customFields") adapted $ \v -> do
-      customerId <- v .: "customer"
+      customerId <- (readMaybe <$> v .: "customer") >>= \case
+        Nothing -> Json.parseFail "customerId not an integer"
+        Just n -> pure n
       timestamp <- v .: "timestamp"
       pure AlertCustomFields
         { customerId
@@ -126,25 +130,24 @@ instance FromJSON AlertCustomFields where
 sfCaseFromHive :: Customer -> Hive.Case Json.Value -> [Json.Value] -> Json.Value
 sfCaseFromHive
     cust
-    hiveCase@Case{caseNum,hiveId,severity}
+    hiveCase@Case{caseNum,hiveId,title,severity}
     esData
   = Json.object
     [ ("Subject", toJSON $ "Hive Case " ++ show caseNum)
     , ("Hive_Case__c", toJSON hiveLink)
     , ("Origin", "Layer 3 Alert")
     , ("RecordTypeId", toJSON @Text "0124p000000V5n5AAC")
-    , ("Security_Incident_Name__c", toJSON humanName)
+    , ("Security_Incident_Name__c", toJSON title)
     , ("Security__c", toJSON ruleId) -- TODO do we still want to use this id?
     , ("Security_Incident_Severity__c", toJSON severity)
     -- TODO: email subject?
     , ("Security_Alert_Attributes__c", toJSON $
-        mkBody cust hiveCase esData humanName
+        mkBody cust hiveCase esData title
       )
     , ("Security_Incident_UUID__c", toJSON traceId)
     , ("Description", toJSON $ aggregateDescription esData)
     ]
   where
-  humanName = "TODO some rule name" -- TODO cleanRuleName notifications alert
   hiveLink = "https://hive.noc.layer3com.com/index.html#!/case/~" <> hiveId <> "/details"
   ruleId = delve (head esData) ["_source", "incident", "id"]
   traceId = delve (head esData) ["_source", "trace", "id"]
@@ -176,10 +179,10 @@ mkBody
   -- case kibanaIndexPattern of
   --   0 -> p_ $ hyperlinkToRelevant allEventsUuid created traceIdentifier
   --   pat -> p_ $ hyperlinkToRelevant pat created traceIdentifier
-  h4_ [] "Attributes:"
+  h3_ [] "Attributes:"
   forM_ esData $ \es -> do
     details_ [] $ do
-      summary_ [] $ h5_ [] $ do
+      summary_ [] $ h4_ [] $ do
         maybeM_ (delve es ["_source", "trace", "id"]) $ \case
           Json.String str -> "Incident ID " <> toHtml str
           _ -> "Incident ID not known"
@@ -238,15 +241,15 @@ mkBody
   --   Nothing -> pure ()
   --   Just Notification{playbooks,suggestedActions,referenceLinks} -> p_ $ do
   --     when (PM.sizeofArray playbooks /= 0) $ do
-  --       h4_ "Playbooks:"
+  --       h3_ "Playbooks:"
   --       forM_ playbooks $ \playbook -> do
   --         p_ $ toHtml playbook
   --     when (PM.sizeofArray suggestedActions /= 0) $ do
-  --       h4_ "Suggested Actions:"
+  --       h3_ "Suggested Actions:"
   --       forM_ suggestedActions $ \suggestedAction -> do
   --         p_ $ toHtml suggestedAction
   --     when (PM.sizeofArray referenceLinks /= 0) $ do
-  --       h4_ "References:"
+  --       h3_ "References:"
   --       forM_ referenceLinks $ \referenceLink -> do
   --         p_ $ toHtml referenceLink
   where
@@ -269,22 +272,26 @@ cleanRuleName notifications Alert{ruleId,ruleName} =
 newtype SfId = SfId Text
 instance Json.FromJSON SfId where
   parseJSON = withObject "salesforce response" $ \v -> do
-    v .: "id"
+    SfId <$> v .: "id"
+
 
 maybeM_ :: (Monad m) => Maybe a -> (a -> m b) -> m ()
 maybeM_ Nothing _ = pure ()
 maybeM_ (Just a) f = f a >> pure ()
 
 jsonAsHtml :: Text -> Json.Value -> Html ()
-jsonAsHtml label = \case
-  Json.String str -> withLabel $ do
-    toHtml str
-  Json.Number 0 -> pure ()
-  Json.Number n -> case Sci.floatingOrInteger n of
-    Right i -> withLabel $ toHtml $ show @Int i
-    Left r -> withLabel $ toHtml $ show @Double r
-  _ -> undefined -- TODO
+jsonAsHtml label = helper withLabel
   where
+  helper :: (Html () -> Html ()) -> Json.Value -> Html ()
+  helper wrap = \case
+    Json.String str -> wrap $ toHtml str
+    Json.Number 0 -> pure ()
+    Json.Number n -> case Sci.floatingOrInteger n of
+      Right i -> wrap $ toHtml $ show @Int i
+      Left r -> wrap $ toHtml $ show @Double r
+    Json.Array (toList -> [x]) -> helper wrap x
+    Json.Array xs -> wrap $ ul_ [] $ forM_ xs $ \x -> li_ [] $ helper Prelude.id x
+    it -> error $ "can't render json: " ++ show it
   withLabel :: Html () -> Html ()
   withLabel content = do
     dt_ [] $ toHtml label

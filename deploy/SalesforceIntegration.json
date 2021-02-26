@@ -1,0 +1,86 @@
+{
+  "name": "Salesforce Integration",
+  "version": "0.2",
+  "author": "Layer 3 Communications",
+  "url": "https://github.com/layer-3-communications/hive-sf-bridge",
+  "license": "BSD-3-Clause",
+  "description": "Create a case in Salesforce from within The Hive",
+  "dataTypeList": ["thehive:case"],
+  "command": "/usr/bin/hive-sf-bridge",
+  "baseConfig": "SalesforceIntegration",
+  "configurationItems": [
+    {
+      "name": "hive_endpoint",
+      "description": "domain name for TheHive api",
+      "type": "string",
+      "multi": false,
+      "required": true,
+      "defaultValue": "hive.noc.layer3com.com"
+    },
+    {
+      "name": "hive_apikey",
+      "description": "api key for TheHive api",
+      "type": "string",
+      "multi": false,
+      "required": true,
+    },
+    {
+      "name": "es_endpoint",
+      "description": "domain name for the Elastisearch api",
+      "type": "string",
+      "multi": false,
+      "required": true,
+      "defaultValue": "es-coordinating.noc.layer3com.com"
+    },
+    {
+      "name": "es_username",
+      "description": "username for Elastisearch api user",
+      "type": "string",
+      "multi": false,
+      "required": true,
+    },
+    {
+      "name": "es_password",
+      "description": "password for Elastisearch api user",
+      "type": "string",
+      "multi": false,
+      "required": true,
+    },
+    {
+      "name": "sf_endpoint",
+      "description": "domain name for the Salesforce api",
+      "type": "string",
+      "multi": false,
+      "required": true,
+      "defaultValue": "layer3.my.salesforce.com"
+    },
+    {
+      "name": "sf_client_id",
+      "description": "id number for the connected app in Salesforce",
+      "type": "string",
+      "multi": false,
+      "required": true,
+    },
+    {
+      "name": "sf_client_secret",
+      "description": "secret for the connected Salesforce app",
+      "type": "string",
+      "multi": false,
+      "required": true
+    },
+    {
+      "name": "sf_username",
+      "description": "Salesforce username",
+      "type": "string",
+      "multi": false,
+      "required": true
+    },
+    {
+      "name": "sf_password",
+      "description": "Salesforce password",
+      "type": "string",
+      "multi": false,
+      "required": true
+    }
+  ]
+}
