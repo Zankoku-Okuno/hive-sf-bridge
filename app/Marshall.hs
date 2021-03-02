@@ -14,14 +14,15 @@ module Marshall
   , AlertCustomFields(..)
   , sfCaseFromHive
   , SfId(..)
+  , Customer(..)
   ) where
 
 import Lucid
 import Prelude hiding (id)
 import qualified Prelude
 
-import Allsight.Email.Data (Action(..), Alert(..))
-import Allsight.Notification (Notification(..), Customer(..))
+import Allsight.Email.Data (Alert(..))
+import Allsight.Notification (Notification(..))
 import Chronos (Offset(..),SubsecondPrecision(..))
 import Control.Monad (forM,forM_)
 import Data.Aeson (FromJSON(..), toJSON, withObject, (.:))
@@ -37,7 +38,6 @@ import qualified Chronos
 import qualified Chronos.Locale.English as EN
 import qualified Data.Aeson as Json
 import qualified Data.Aeson.Types as Json
-import qualified Data.HashMap.Strict as HMap
 import qualified Data.List as List
 import qualified Data.Scientific as Sci
 import qualified Data.Text as T
@@ -101,41 +101,18 @@ instance FromJSON AlertCustomFields where
         , date = takeWhile (/= 'T') timestamp
         }
 
--- -- takes only the data field of the Hive input
--- alertFromHive :: Json.Value -> Json.Parser Alert
--- alertFromHive = withObject "case data" $ \v -> do
---   created <- v .: "createdAt"
---   ruleName <- TS.fromText <$> v .: "title"
---   ruleDescription <- v .: "description"
---   customFields <- v .: "customFields" >>= withObject "custom fields" pure
---   let recordsHtml = mkRecordsHtml customFields
---   severity <- v .: "severity"
---   let customer = 3000 -- TODO
---       ruleId = 1106 -- TODO
---       traceIdentifier = 0 -- TODO
---   pure Alert
---     { action = Create
---     , traceIdentifier
---     , created
---     , ruleName
---     , ruleDescription
---     , recordsHtml
---     , customer
---     , severity
---     , ruleId
---     }
-
 -- FIXME move the rule name cleaning functionality out of elastirec
 
 sfCaseFromHive :: Customer -> Hive.Case Json.Value -> [Json.Value] -> Json.Value
 sfCaseFromHive
-    cust
+    cust@Customer{sfAccountId}
     hiveCase@Case{caseNum,hiveId,title,severity}
     esData
   = Json.object
     [ ("Subject", toJSON $ "Hive Case " ++ show caseNum)
     , ("Hive_Case__c", toJSON hiveLink)
     , ("Origin", "Layer 3 Alert")
+    , ("AccountId", toJSON sfAccountId)
     , ("RecordTypeId", toJSON @Text "0124p000000V5n5AAC")
     , ("Security_Incident_Name__c", toJSON title)
     , ("Security__c", toJSON ruleId) -- TODO do we still want to use this id?
@@ -162,7 +139,7 @@ aggregateDescription esData = T.intercalate "\n\n" $ List.nub . catMaybes $
 
 mkBody :: Customer -> Hive.Case Json.Value -> [Json.Value] -> Text -> TL.Text
 mkBody
-    Customer{name,kibanaIndexPattern}
+    Customer{name}
     hiveCase
     esData
     humanName = Lucid.renderText $ do
@@ -302,3 +279,31 @@ delve v0 path0 =Json.parseMaybe (loop path0) v0
   where
   loop [] = pure
   loop (prop:path) = withObject "" $ (loop path =<<) . (.: prop)
+
+
+------
+
+data Customer = Customer
+  { id :: !Int64
+  , sfAccountId :: !Text
+  , name :: !Text
+  -- , email :: !Text
+  -- , severity :: !Int64
+  -- , contacts :: !Contacts
+  -- , kibanaIndexPattern :: {-# UNPACK #-} !Word128
+  }
+
+instance FromJSON Customer where
+  parseJSON = Json.withObject "Customer" $ \v -> do
+    id <- v .: "id"
+    sfAccountId <- v .: "salesforce_account_id"
+    name <- v .: "name"
+    pure Customer{id,sfAccountId,name}
+    -- email <- v .: "email"
+    -- severity <- v .: "severity"
+    -- contacts <- v .: "contacts"
+    -- kibanaIndexPattern' <- v .: "kibana_index_pattern"
+    -- case UUID.decodeHyphenated (Bytes.fromShortByteString (TS.toShortByteString (TS.fromText kibanaIndexPattern'))) of
+    --   Nothing -> fail "kibana_index_pattern should be a UUID"
+    --   Just kibanaIndexPattern -> pure Customer
+    --     { id , name , email , severity , contacts , kibanaIndexPattern }

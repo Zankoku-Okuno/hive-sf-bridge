@@ -9,11 +9,12 @@ module Main where
 
 import Prelude hiding (id)
 
-import Allsight.Notification (Notification(..), Customer(..))
+import Allsight.Notification (Notification(..))
 import Control.Applicative ((<**>))
 import Control.Monad (when, forM)
 import Data.Aeson (toJSON)
 import Data.Functor ((<&>))
+import Marshall (Customer(..))
 import System.Exit (exitSuccess)
 
 import qualified Data.Aeson as Json
