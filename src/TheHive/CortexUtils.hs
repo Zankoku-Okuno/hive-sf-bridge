@@ -15,6 +15,7 @@ module TheHive.CortexUtils
 import Control.Exception (SomeException,catch)
 import Data.Aeson (FromJSON)
 import Data.Functor ((<&>))
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
 import System.Exit (exitFailure)
@@ -35,7 +36,8 @@ type Responder customFields
 -- `jobDir` is expected to be drawn from an optional string argument at the start of the command line options
 main :: forall customFields. (FromJSON customFields) =>
   Maybe FilePath -> Responder customFields -> IO ()
-main jobDir action = do
+main jobDirOverride action = do
+  jobDir <- getJobDir
   input <- getInput jobDir
   let sourceDescr = case jobDir of
         Nothing -> "stdin"
@@ -63,6 +65,13 @@ main jobDir action = do
         ]
       exitFailure
   where
+  getJobDir :: IO (Maybe FilePath)
+  getJobDir = do
+    let jobDir = fromMaybe "/job" jobDirOverride
+    let inputPath = jobDir </> "input/input.json"
+    doesFileExist inputPath <&> \case
+      True -> Just inputPath
+      False -> Nothing
   getInput :: Maybe FilePath -> IO LBS.ByteString
   -- new style is to read from a file in the job directory
   getInput (Just jobDir) = LBS.readFile (jobDir </> "input/input.json")
