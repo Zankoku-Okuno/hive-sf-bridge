@@ -21,8 +21,6 @@ import Lucid
 import Prelude hiding (id)
 import qualified Prelude
 
-import Allsight.Email.Data (Alert(..))
-import Allsight.Notification (Notification(..))
 import Chronos (Offset(..),SubsecondPrecision(..))
 import Control.Monad (forM,forM_)
 import Data.Aeson (FromJSON(..), toJSON, withObject, (.:))
@@ -237,13 +235,6 @@ mkBody
 
 instance Json.FromJSON ShortText where
   parseJSON = (TS.fromText <$>) . Json.parseJSON
-
--- FIXME put this in `allsight-email` and de-duplicate from `allsight`
-cleanRuleName :: [Notification] -> Alert -> Text
-cleanRuleName notifications Alert{ruleId,ruleName} =
-  case List.find (\(Notification{id}) -> id == ruleId) notifications of
-    Nothing -> TS.toText ruleName
-    Just Notification{friendlyName} -> friendlyName
 
 
 newtype SfId = SfId Text

@@ -9,7 +9,6 @@ module Main where
 
 import Prelude hiding (id)
 
-import Allsight.Notification (Notification(..))
 import Control.Applicative ((<**>), optional)
 import Control.Monad (when, forM)
 import Data.Aeson (toJSON)
@@ -42,7 +41,7 @@ decodeJsonOrDie errPrefix inp =
 
 main :: IO ()
 main = do
-  Settings{jobDir,customersFile,notificationsFile,dryRun} <- Options.execParser programOptions
+  Settings{jobDir,customersFile,dryRun} <- Options.execParser programOptions
   Hive.main jobDir $ \(Hive.CaseVal hiveCase) (Hive.ResponderConfig rconfig) -> do
     -- parse configuration from TheHive
     conf <- fromJsonOrDie @Marshall.Config "bad config from TheHive" rconfig
@@ -111,7 +110,6 @@ main = do
 data Settings = Settings
   { jobDir :: Maybe FilePath
   , customersFile :: FilePath
-  , notificationsFile :: FilePath
   , dryRun :: Bool
   }
 
@@ -134,13 +132,6 @@ programOptions = Options.info (parser <**> Options.helper)
         <> Options.metavar "FILEPATH"
         <> Options.value "/etc/hive-sf-bridge/customers.json"
         <> Options.help "Path to JSON file with customer information"
-        <> Options.action "file"
-        )
-    <*> Options.strOption
-        (  Options.long "notifications"
-        <> Options.metavar "FILEPATH"
-        <> Options.value "/etc/hive-sf-bridge/notifications.json"
-        <> Options.help "Path to JSON file with extra notification metadata"
         <> Options.action "file"
         )
     <*> Options.switch

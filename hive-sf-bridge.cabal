@@ -46,7 +46,6 @@ executable hive-sf-bridge
     Marshall
   build-depends:
     , aeson
-    , allsight-email
     , base
     , bytestring
     , chronos >=1.1
