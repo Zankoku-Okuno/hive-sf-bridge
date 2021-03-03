@@ -6,7 +6,7 @@
   "license": "BSD-3-Clause",
   "description": "Create a case in Salesforce from within The Hive",
   "dataTypeList": ["thehive:case"],
-  "command": "/usr/bin/hive-sf-bridge",
+  "command": "/opt/bin/hive-sf-bridge",
   "baseConfig": "SalesforceIntegration",
   "configurationItems": [
     {

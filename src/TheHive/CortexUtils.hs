@@ -17,7 +17,6 @@ import Data.Aeson (FromJSON)
 import Data.Functor ((<&>))
 import Data.Text (Text)
 import System.Directory (createDirectoryIfMissing, doesFileExist)
-import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.FilePath ((</>))
 import TheHive.Types (Value(..), ResponderConfig, Case(..))
@@ -33,10 +32,10 @@ type Responder customFields
   -> ResponderConfig
   -> IO (Either Text Text)
 
+-- `jobDir` is expected to be drawn from an optional string argument at the start of the command line options
 main :: forall customFields. (FromJSON customFields) =>
   Maybe FilePath -> Responder customFields -> IO ()
-main jobDirOverride action = do
-  jobDir <- getJobDir
+main jobDir action = do
   input <- getInput jobDir
   value <- case Json.eitherDecode @(Value customFields) input of
     Left err -> error $ "bad input: " ++ err
@@ -61,15 +60,6 @@ main jobDirOverride action = do
         ]
       exitFailure
   where
-  getJobDir :: IO (Maybe FilePath)
-  getJobDir = do
-    jobDir <- maybe fromArgs pure jobDirOverride
-    let inputPath = jobDir </> "input/input.json"
-    doesFileExist inputPath <&> \case
-      True -> Just inputPath
-      False -> Nothing
-    where
-    fromArgs = getArgs >>= \case { (jobDir:_) -> pure jobDir; _ -> pure "/job" }
   getInput :: Maybe FilePath -> IO LBS.ByteString
   -- new style is to read from a file in the job directory
   getInput (Just jobDir) = LBS.readFile (jobDir </> "input/input.json")
