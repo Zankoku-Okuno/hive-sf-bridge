@@ -1,2 +1,4 @@
 SECRETS/
 dist-newstyle/
+deploy/customers.json
+deploy/notifications.json

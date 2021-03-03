@@ -37,11 +37,14 @@ main :: forall customFields. (FromJSON customFields) =>
   Maybe FilePath -> Responder customFields -> IO ()
 main jobDir action = do
   input <- getInput jobDir
+  let sourceDescr = case jobDir of
+        Nothing -> "stdin"
+        Just path -> path
   value <- case Json.eitherDecode @(Value customFields) input of
-    Left err -> error $ "bad input: " ++ err
+    Left err -> error $ "bad responder input [" ++ sourceDescr ++ "]: " ++ err
     Right it -> pure it
   config <- case Json.eitherDecode @ResponderConfig input of
-    Left err -> error $ "bad input: " ++ err
+    Left err -> error $ "bad responder config [" ++ sourceDescr ++ "]: " ++ err
     Right it -> pure it
   -- TODO check tlp and pap, whatever they are
   action value config `catch` showAllExns >>= \case
