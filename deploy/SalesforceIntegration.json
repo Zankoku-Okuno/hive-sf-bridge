@@ -25,6 +25,13 @@
       "required": true,
     },
     {
+      "name": "allsight_endpoint",
+      "description": "Allsight 3 server",
+      "type": "string",
+      "multi": false,
+      "required": true
+    },
+    {
       "name": "es_endpoint",
       "description": "domain name for the Elastisearch api",
       "type": "string",

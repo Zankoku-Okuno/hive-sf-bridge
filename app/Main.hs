@@ -13,12 +13,13 @@ import Control.Applicative ((<**>), optional)
 import Control.Monad (when, forM)
 import Data.Aeson (toJSON)
 import Data.Functor ((<&>))
-import Marshall (Customer(..))
+import Marshall (Customer(..),allsight)
 import System.Exit (exitSuccess)
 
 import qualified Data.Aeson as Json
 import qualified Data.Aeson.Types as Json
-import qualified Data.ByteString.Lazy.Char8 as LBS
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.ByteString.Lazy.Char8 as LBSChar
 import qualified Data.List as List
 import qualified Data.Text as T
 import qualified Elasticsearch.Client as ES
@@ -41,17 +42,18 @@ decodeJsonOrDie errPrefix inp =
 
 main :: IO ()
 main = do
-  Settings{jobDir,customersFile,dryRun} <- Options.execParser programOptions
+  Settings{jobDir,dryRun} <- Options.execParser programOptions
   Hive.main jobDir $ \(Hive.CaseVal hiveCase) (Hive.ResponderConfig rconfig) -> do
     -- parse configuration from TheHive
     conf <- fromJsonOrDie @Marshall.Config "bad config from TheHive" rconfig
-    -- load databases
-    customers <- Json.eitherDecodeFileStrict' customersFile >>= \case
-      Left err -> fail ("While decoding customers JSON: " ++ err)
-      Right v -> pure (v :: [Customer])
-    -- notifications <- Json.eitherDecodeFileStrict' notificationsFile >>= \case
-    --   Left err -> fail ("While decoding notifications JSON: " ++ err)
-    --   Right v -> pure (v :: [Notification])
+    -- load customer database
+    (customers :: [Customer]) <- do
+      manager <- Http.newManager Http.defaultManagerSettings
+      request <- Http.parseRequest (concat ["http://", allsight conf, "/customers.json"])
+      response <- Http.httpLbs request manager
+      pure $ case Json.eitherDecodeStrict' (LBS.toStrict $ Http.responseBody response) of
+        Right v -> v
+        Left err -> error ("While decoding customers JSON: " ++ err)
 
     -- accumulate alert and incident data
     hiveManager <- Hive.newManager (Marshall.hive conf)
@@ -92,7 +94,7 @@ main = do
     -- marshall information into salesforce-expected Json
     let newCase = Marshall.sfCaseFromHive customer hiveCase esIncidents
     when (dryRun) $ do
-      LBS.putStrLn $ Json.encode newCase
+      LBSChar.putStrLn $ Json.encode newCase
       exitSuccess
     -- talk to SalesForce
     sfManager <- Sf.newManager (Marshall.sf conf)
@@ -109,7 +111,6 @@ main = do
 
 data Settings = Settings
   { jobDir :: Maybe FilePath
-  , customersFile :: FilePath
   , dryRun :: Bool
   }
 
@@ -127,13 +128,6 @@ programOptions = Options.info (parser <**> Options.helper)
         <> Options.help "Path for Cortex to specify a directory for input/output files."
         <> Options.action "directory"
         ))
-    <*> Options.strOption
-        (  Options.long "customers"
-        <> Options.metavar "FILEPATH"
-        <> Options.value "/etc/hive-sf-bridge/customers.json"
-        <> Options.help "Path to JSON file with customer information"
-        <> Options.action "file"
-        )
     <*> Options.switch
         (  Options.long "dry-run"
         <> Options.short 'n'

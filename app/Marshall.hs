@@ -51,6 +51,7 @@ data Config = Config
   { hive :: Hive.Config
   , es :: ES.Config
   , sf :: SF.Config
+  , allsight :: String
   }
 instance FromJSON Config where
   parseJSON = withObject "Hive config" $ \v -> do
@@ -64,13 +65,14 @@ instance FromJSON Config where
       password <- v .: "es_password"
       pure ES.Config{endpoint,username,password}
     sf <- do
-      endpoint <-  v .: "sf_endpoint"
+      endpoint <- v .: "sf_endpoint"
       clientId <- v .: "sf_clientId"
       clientSecret <- v .: "sf_clientSecret"
       username <- v .: "sf_username"
       password <- v .: "sf_password"
       pure SF.Config{endpoint,clientId,clientSecret,username,password}
-    pure Config{hive,es,sf}
+    allsight <- v .: "allsight_endpoint"
+    pure Config{hive,allsight,es,sf}
 
 -- data Data = Data
 --   { hiveData :: Hive.Case

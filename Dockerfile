@@ -25,7 +25,6 @@ RUN mkdir -p /opt/bin/
 RUN mkdir -p /etc/hive-sf-bridge/
 RUN apt-get update && apt-get install -y curl zlib1g
 RUN cp /root/hive-sf-bridge/dist-newstyle/build/x86_64-linux/ghc-8.10.4/hive-sf-bridge-0.1.0.0/x/hive-sf-bridge/build/hive-sf-bridge/hive-sf-bridge /opt/bin
-COPY deploy/customers.json /etc/hive-sf-bridge
 
 # minimize the image...?
 RUN apt-get remove -y --autoremove \
