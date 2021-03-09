@@ -33,5 +33,5 @@ RUN apt-get remove -y --autoremove \
 RUN rm -r /root/hive-sf-bridge
 
 # Prepare to Run
-VOLUME /job
+RUN mkdir -p /job
 CMD ["/opt/bin/hive-sf-bridge","--customers","/etc/hive-sf-bridge/customers.json"]
