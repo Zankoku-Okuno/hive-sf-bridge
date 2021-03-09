@@ -1,9 +1,8 @@
-FROM ubuntu:20.04
-RUN apt-get update \
-    && apt-get install -y software-properties-common \
-    && add-apt-repository ppa:hvr/ghc \
-    && apt-get update && apt-get install -y ghc-8.10.4 cabal-install-3.2 \
-    && apt-get remove -y software-properties-common
+FROM ubuntu:20.04 AS builder
+RUN apt-get update
+RUN apt-get install -y software-properties-common
+RUN add-apt-repository ppa:hvr/ghc
+RUN apt-get update && apt-get install -y ghc-8.10.4 cabal-install-3.2
 ENV PATH="${PATH}:/opt/ghc/bin"
 RUN cabal update
 
@@ -21,17 +20,12 @@ RUN cabal build
 WORKDIR /
 
 # install the application
-RUN mkdir -p /opt/bin/
-RUN mkdir -p /etc/hive-sf-bridge/
-RUN apt-get update && apt-get install -y curl zlib1g
-RUN cp /root/hive-sf-bridge/dist-newstyle/build/x86_64-linux/ghc-8.10.4/hive-sf-bridge-0.1.0.0/x/hive-sf-bridge/build/hive-sf-bridge/hive-sf-bridge /opt/bin
+FROM ubuntu:20.04
 
-# minimize the image...?
-RUN apt-get remove -y --autoremove \
-      ghc-8.10.4 cabal-install-3.2 \
-      zlib1g-dev
-RUN rm -r /root/hive-sf-bridge
+RUN apt-get update && apt-get install -y curl zlib1g libgmp10
+RUN mkdir -p /opt/bin/
+COPY --from=builder /root/hive-sf-bridge/dist-newstyle/build/x86_64-linux/ghc-8.10.4/hive-sf-bridge-0.1.0.0/x/hive-sf-bridge/build/hive-sf-bridge/hive-sf-bridge /opt/bin
+RUN chmod +x /opt/bin/hive-sf-bridge
 
 # Prepare to Run
-RUN mkdir -p /job
-CMD ["/opt/bin/hive-sf-bridge","--customers","/etc/hive-sf-bridge/customers.json"]
+ENTRYPOINT ["/opt/bin/hive-sf-bridge"]

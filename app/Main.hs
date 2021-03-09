@@ -13,7 +13,7 @@ import Control.Applicative ((<**>), optional)
 import Control.Monad (when, forM)
 import Data.Aeson (toJSON)
 import Data.Functor ((<&>))
-import Marshall (Customer(..),allsight)
+import Marshall (Customer(..), allsight)
 import System.Exit (exitSuccess)
 
 import qualified Data.Aeson as Json
@@ -25,6 +25,7 @@ import qualified Data.Text as T
 import qualified Elasticsearch.Client as ES
 import qualified Marshall
 import qualified Network.HTTP.Client as Http
+import qualified Network.HTTP.Client.TLS as Http
 import qualified Options.Applicative as Options
 import qualified Salesforce.Client as Sf
 import qualified TheHive.Client as Hive
@@ -48,8 +49,8 @@ main = do
     conf <- fromJsonOrDie @Marshall.Config "bad config from TheHive" rconfig
     -- load customer database
     (customers :: [Customer]) <- do
-      manager <- Http.newManager Http.defaultManagerSettings
-      request <- Http.parseRequest (concat ["http://", allsight conf, "/customers.json"])
+      manager <- Http.newManager Http.tlsManagerSettings
+      request <- Http.parseRequest (concat ["https://", allsight conf, "/customers.json"])
       response <- Http.httpLbs request manager
       pure $ case Json.eitherDecodeStrict' (LBS.toStrict $ Http.responseBody response) of
         Right v -> v
@@ -96,6 +97,7 @@ main = do
     when (dryRun) $ do
       LBSChar.putStrLn $ Json.encode newCase
       exitSuccess
+
     -- talk to SalesForce
     sfManager <- Sf.newManager (Marshall.sf conf)
                   <&> \x -> x{Sf.prettyPrint=True} -- DEBUG
@@ -106,13 +108,16 @@ main = do
     -- maybe (error theError) pure $ do
     --   obj <- Json.decode @Json.Object (Http.responseBody response)
     --   HMap.lookup "id" obj >>= fromText
+
     pure . Right $ "Salesforce case ID is: " <> sfId
+
 
 
 data Settings = Settings
   { jobDir :: Maybe FilePath
   , dryRun :: Bool
   }
+  deriving(Show)
 
 programOptions :: Options.ParserInfo Settings
 programOptions = Options.info (parser <**> Options.helper)

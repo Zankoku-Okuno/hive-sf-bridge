@@ -66,8 +66,8 @@ instance FromJSON Config where
       pure ES.Config{endpoint,username,password}
     sf <- do
       endpoint <- v .: "sf_endpoint"
-      clientId <- v .: "sf_clientId"
-      clientSecret <- v .: "sf_clientSecret"
+      clientId <- v .: "sf_client_id"
+      clientSecret <- v .: "sf_client_secret"
       username <- v .: "sf_username"
       password <- v .: "sf_password"
       pure SF.Config{endpoint,clientId,clientSecret,username,password}

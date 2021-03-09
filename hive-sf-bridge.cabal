@@ -51,6 +51,7 @@ executable hive-sf-bridge
     , chronos >=1.1
     , hive-sf-bridge
     , http-client
+    , http-client-tls
     , lucid >=2.9
     , optparse-applicative >=0.16
     , primitive >=0.7

@@ -38,18 +38,7 @@ main :: forall customFields. (FromJSON customFields) =>
   Maybe FilePath -> Responder customFields -> IO ()
 main jobDirOverride action = do
   jobDir <- getJobDir
-  input <- getInput jobDir
-  let sourceDescr = case jobDir of
-        Nothing -> "stdin"
-        Just path -> path
-  value <- case Json.eitherDecode @(Value customFields) input of
-    Left err -> error $ "bad responder input [" ++ sourceDescr ++ "]: " ++ err
-    Right it -> pure it
-  config <- case Json.eitherDecode @ResponderConfig input of
-    Left err -> error $ "bad responder config [" ++ sourceDescr ++ "]: " ++ err
-    Right it -> pure it
-  -- TODO check tlp and pap, whatever they are
-  action value config `catch` showAllExns >>= \case
+  go jobDir `catch` showAllExns >>= \case
     Right msg -> setOutput jobDir $ HMap.fromList $
       [ ("success", Json.toJSON True)
       , ("full", Json.Object $ HMap.fromList
@@ -59,18 +48,32 @@ main jobDirOverride action = do
       , ("operations", Json.toJSON @[Json.Value] []) -- TODO
       ]
     Left errmsg -> do
-      setOutput jobDir $ HMap.fromList $
+      -- setOutput jobDir $ HMap.fromList $
+      setOutput Nothing $ HMap.fromList $ -- DEBUG
         [ ("success", Json.toJSON False)
         , ("message", Json.toJSON errmsg)
         ]
       exitFailure
   where
+  go jobDir = do
+    input <- getInput jobDir
+    let sourceDescr = case jobDir of
+          Nothing -> "stdin"
+          Just path -> path
+    value <- case Json.eitherDecode @(Value customFields) input of
+      Left err -> error $ "bad responder input [" ++ sourceDescr ++ "]: " ++ err
+      Right it -> pure it
+    config <- case Json.eitherDecode @ResponderConfig input of
+      Left err -> error $ "bad responder config [" ++ sourceDescr ++ "]: " ++ err
+      Right it -> pure it
+    -- TODO check tlp and pap, whatever they are
+    action value config
   getJobDir :: IO (Maybe FilePath)
   getJobDir = do
     let jobDir = fromMaybe "/job" jobDirOverride
     let inputPath = jobDir </> "input/input.json"
     doesFileExist inputPath <&> \case
-      True -> Just inputPath
+      True -> Just jobDir
       False -> Nothing
   getInput :: Maybe FilePath -> IO LBS.ByteString
   -- new style is to read from a file in the job directory
@@ -80,7 +83,7 @@ main jobDirOverride action = do
   setOutput :: Maybe FilePath -> Json.Object -> IO ()
   setOutput (Just jobDir) out = do
     createDirectoryIfMissing True (jobDir </> "output")
-    LBS.writeFile (jobDir </> "output/output.json") (Json.encode out)
+    LBS.writeFile (jobDir </> "output" </> "output.json") (Json.encode out)
   setOutput Nothing out = LBS.putStr (Json.encode out)
   showAllExns :: SomeException -> IO (Either Text a)
   showAllExns = pure . Left . T.pack . show
