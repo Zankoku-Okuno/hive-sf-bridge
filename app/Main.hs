@@ -13,6 +13,7 @@ import Control.Applicative ((<**>), optional)
 import Control.Monad (when, forM)
 import Data.Aeson (toJSON)
 import Data.Functor ((<&>))
+import TheHive.CortexUtils (Operation(AddTagToCase))
 import Marshall (Customer(..), allsight)
 import System.Exit (exitSuccess)
 
@@ -109,8 +110,10 @@ main = do
     --   obj <- Json.decode @Json.Object (Http.responseBody response)
     --   HMap.lookup "id" obj >>= fromText
 
-    pure . Right $ "Salesforce case ID is: " <> sfId
-
+    pure . Right $ Hive.SuccessResponse
+      { message = "Salesforce case ID is: " <> sfId
+      , operations = [ AddTagToCase sfId ]
+      }
 
 
 data Settings = Settings
