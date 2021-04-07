@@ -19,3 +19,8 @@ hiveDomain=hive.noc.layer3com.com
 hiveAuth="Authorization: Bearer $HIVE_APIKEY"
 
 curl -k -v "https://${hiveDomain}/api/case/${hiveCaseId}" -H "$hiveAuth"
+
+# get all alerts (takes several seconds)
+# curl -k -H "Authorization: Bearer $HIVE_APIKEY" \
+#   "https://${HIVE_DOMAIN}/api/alert?range=all" \
+#   -o all_alerts.json
