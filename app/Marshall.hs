@@ -19,9 +19,6 @@ module Marshall
   , Customer(..)
   ) where
 
-import System.IO.Unsafe -- DEBUG
-import System.IO -- DEBUG
-
 import Lucid
 import Prelude hiding (id)
 import qualified Prelude
@@ -155,7 +152,7 @@ aggregateDescription esData = T.intercalate "\n\n" $ List.nub . catMaybes $
 
 mkBody :: Customer -> Hive.Case Json.Value -> [Json.Value] -> Text -> TL.Text
 mkBody
-    cust@Customer{name}
+    Customer{name,kibanaIndexPattern}
     hiveCase
     esData
     humanName = Lucid.renderText $ do
@@ -168,7 +165,13 @@ mkBody
         (Hive.createdTime hiveCase)))
   p_ $ h2_ $ toHtml humanName
   p_ $ toHtml $ aggregateDescription esData
-  -- p_ $ hyperlinkToTraceId traceIdentifier
+  let traceIds = incidentToEventId <$> esData
+      times = incidentToTime <$> esData
+      start = Timespan (-7_200_000_000_000) `Torsor.add` minimum times
+      end = Timespan 7_200_000_000_000 `Torsor.add` maximum times
+      url = kibanaTemplate kibanaIndexPattern (start, end) traceIds
+  p_ $ a_ [ href_ $ TS.toText url ] "View Incidents in Kibana"
+  -- TODO port the zero-case handling in
   -- case kibanaIndexPattern of
   --   0 -> p_ $ hyperlinkToRelevant allEventsUuid created traceIdentifier
   --   pat -> p_ $ hyperlinkToRelevant pat created traceIdentifier
@@ -179,9 +182,6 @@ mkBody
         maybeM_ (delve es ["_source", "trace", "id"]) $ \case
           Json.String str -> "Incident ID " <> toHtml str
           _ -> "Incident ID not known"
-      () <- pure $ unsafePerformIO $ hPutStrLn stderr (T.unpack . TS.toText $ incidentToKibanaUrl cust es) -- DEBUG
-      a_ [href_ $ TS.toText $ incidentToKibanaUrl cust es] $
-        toHtml ("View on Kibana" :: Text)
       dl_ [] $ do
         esAttr es ["destination", "addresses"]
         esAttr es ["destination", "ip"]
@@ -232,7 +232,6 @@ mkBody
         esAttr es ["trace", "id"]
         esAttr es ["url", "domains"]
         esAttr es ["url", "domains_count"]
-
   -- case List.find (\(Notification{id}) -> id == ruleId) notifications of
   --   Nothing -> pure ()
   --   Just Notification{playbooks,suggestedActions,referenceLinks} -> p_ $ do
@@ -252,11 +251,18 @@ mkBody
   esAttr es path = do
     maybeM_ (delve es ("_source":path)) $ jsonAsHtml (T.intercalate "." path)
 
-incidentToKibanaUrl :: Customer -> Json.Value -> ShortText
-incidentToKibanaUrl Customer{kibanaIndexPattern} inc
-  = kibanaEventUrl kibanaIndexPattern time incUuid
-  where
-  time = fromJSON <$> delve inc ["_source", "event", "created"] & \case
+incidentToEventId :: Json.Value -> Word128
+incidentToEventId inc = delve inc ["_source", "trace", "id"] & \case
+  Nothing -> error "incident has no trace id"
+  Just rawId -> Json.parseEither parseJSON rawId & \case
+    Left err -> error $ "ill-typed incident trace id: " ++ err
+    Right id -> Base62.decode128 (Bytes.fromAsciiString id) & \case
+      Nothing -> error "malformed incident trace id"
+      Just it -> it
+
+incidentToTime :: Json.Value -> Time
+incidentToTime inc = fromJSON <$> delve inc ["_source", "event", "created"]
+  & \case
     Nothing -> error "incident has no event.created"
     Just (Json.Success str) ->
       T.encodeUtf8 str
@@ -265,41 +271,7 @@ incidentToKibanaUrl Customer{kibanaIndexPattern} inc
         Nothing -> error "malformed incident event.created"
         Just it -> Chronos.datetimeToTime it
     Just _ -> error $ "malformed incident trace id"
-  -- base62 encoded
-  incUuid = delve inc ["_source", "trace", "id"] & \case
-    Nothing -> error "incident has no trace id"
-    Just rawId -> Json.parseEither parseJSON rawId & \case
-      Left err -> error $ "ill-typed incident trace id: " ++ err
-      Right id -> Base62.decode128 (Bytes.fromAsciiString id) & \case
-        Nothing -> error "malformed incident trace id"
-        Just it -> it
 
-kibanaEventUrl ::
-     Word128 -- Index Pattern UUID
-  -> Time -- Timestamp
-  -> Word128 -- Incident UUID
-  -> ShortText
-kibanaEventUrl !indPatUuid !time !ident = mconcat
-  [ "https://dashboard.layer3com.com/s/allsight/app/kibana#/discover/10fd50f0-0735-11eb-9ff7-e9ef8c9367f7?_g=(filters:!(),refreshInterval:(pause:!t,value:0),time:(from:'"
-  , encodeKibanaUrlTime start
-  , "Z',to:'"
-  , encodeKibanaUrlTime end
-  , "Z'))&_a=(filters:!(('$state':(store:appState),meta:(alias:!n,disabled:!f,index:'"
-  , encIndPat
-  , "',key:event.ids,negate:!f,params:(query:'"
-  , encIdent
-  , "'),type:phrase),query:(match_phrase:(event.ids:'"
-  , encIdent
-  , "')))),index:'"
-  , encIndPat
-  , "',interval:auto)"
-  ]
-  where
-  -- 
-  encIndPat = ba2st $ UUID.encodeHyphenated indPatUuid
-  encIdent = ba2st $ Base62.encode128 ident
-  start = Torsor.add (Timespan (-7_200_000_000_000)) time
-  end = Torsor.add (Timespan 7_200_000_000_000) time
 encodeKibanaUrlTime :: Time -> ShortText
 encodeKibanaUrlTime t = case TS.fromByteString b of
   Nothing -> errorWithoutStackTrace "Allsight.Notification.encodeKibanaUrlTime: implementation mistake"
@@ -308,8 +280,52 @@ encodeKibanaUrlTime t = case TS.fromByteString b of
   b = Chronos.encodeUtf8_YmdHMS (Chronos.SubsecondPrecisionFixed 3) Chronos.w3c
     $ Chronos.timeToDatetime
     $ t
-ba2st :: ByteArray -> ShortText
-ba2st (ByteArray x) = TS.fromShortByteStringUnsafe (SBS x)
+
+kibanaTemplate :: Word128 -> (Time, Time) -> [Word128] -> ShortText
+kibanaTemplate indexPattern (start, end) eventIds = TS.filter (/= ' ') $
+  "https://dashboard.layer3com.com/s/allsight/app/kibana#\
+    \/discover/10fd50f0-0735-11eb-9ff7-e9ef8c9367f7\
+    \?_g=\
+      \( filters: !()\
+      \, refreshInterval: (pause: !t, value: 0)\
+      \, time: \
+        \( from: '" <> encodeKibanaUrlTime start <> "Z'\
+        \, to: '" <> encodeKibanaUrlTime end <> "Z')\
+      \)\
+    \&_a=\
+      \( filters: \
+        \!(( '$state': (store: appState)\
+          \, meta: \
+            \( alias: !n\
+            \, disabled: !f\
+            \, index: e064c1b0-e616-11ea-9ff7-e9ef8c9367f7\
+            \, key: event.ids\
+            \, negate: !f\
+            \, params: !('" <> TS.intercalate "','" encodedIds <> "')\
+            \, type: phrases\
+            \, value: '" <> TS.intercalate ",%20" encodedIds <> "'\
+            \)\
+          \, query: \
+            \( bool: \
+              \( minimum_should_match: 1\
+              \, should: \
+                \!("
+                  <> (TS.intercalate "," $
+                    flip map encodedIds $ \encId ->
+                      "(match_phrase: (event.ids: '" <> encId <> "'))"
+                  ) <>
+                ")\
+              \)\
+            \)\
+          \)\
+        \)\
+      \, index: '" <> (ba2st . UUID.encodeHyphenated) indexPattern <> "'\
+      \, interval: auto\
+      \)\
+  \"
+  where
+  encodedIds :: [ShortText]
+  encodedIds = (ba2st . Base62.encode128 ) <$> eventIds
 
 instance FromJSON ShortText where
   parseJSON = (TS.fromText <$>) . Json.parseJSON
@@ -375,3 +391,6 @@ instance FromJSON Customer where
     -- email <- v .: "email"
     -- severity <- v .: "severity"
     -- contacts <- v .: "contacts"
+
+ba2st :: ByteArray -> ShortText
+ba2st (ByteArray x) = TS.fromShortByteStringUnsafe (SBS x)
