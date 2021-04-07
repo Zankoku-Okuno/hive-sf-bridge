@@ -1,6 +1,8 @@
+{-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DuplicateRecordFields #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE NamedFieldPuns #-}
+{-# LANGUAGE NumericUnderscores #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TupleSections #-}
@@ -21,30 +23,41 @@ import Lucid
 import Prelude hiding (id)
 import qualified Prelude
 
-import Chronos (Offset(..),SubsecondPrecision(..))
+import Chronos (Time,Timespan(Timespan),Offset(..),SubsecondPrecision(..))
 import Control.Monad (forM,forM_)
-import Data.Aeson (FromJSON(..), toJSON, withObject, (.:))
+import Data.Aeson (FromJSON(..), toJSON, fromJSON, withObject, (.:))
+import Data.ByteString.Short.Internal (ShortByteString(SBS))
 import Data.Foldable (toList)
+import Data.Function ((&))
 import Data.Int (Int64)
 import Data.Maybe (catMaybes)
+import Data.Primitive (ByteArray(..))
 import Data.Text (Text)
 import Data.Text.Short (ShortText)
+import Data.WideWord (Word128)
 import Text.Read (readMaybe)
 import TheHive.CortexUtils (Case(..))
+
 
 import qualified Chronos
 import qualified Chronos.Locale.English as EN
 import qualified Data.Aeson as Json
 import qualified Data.Aeson.Types as Json
+import qualified Data.Bytes as Bytes
 import qualified Data.List as List
 import qualified Data.Scientific as Sci
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as T
 import qualified Data.Text.Lazy as TL
 import qualified Data.Text.Short as TS
+import qualified Data.Text.Short.Unsafe as TS
+import qualified Data.Word.Base62 as Base62
 import qualified Elasticsearch.Client as ES
 import qualified Salesforce.Client as SF
 import qualified TheHive.Client as Hive
 import qualified TheHive.CortexUtils as Hive
+import qualified Torsor
+import qualified UUID
 
 
 data Config = Config
@@ -139,7 +152,7 @@ aggregateDescription esData = T.intercalate "\n\n" $ List.nub . catMaybes $
 
 mkBody :: Customer -> Hive.Case Json.Value -> [Json.Value] -> Text -> TL.Text
 mkBody
-    Customer{name}
+    Customer{name,kibanaIndexPattern}
     hiveCase
     esData
     humanName = Lucid.renderText $ do
@@ -152,7 +165,13 @@ mkBody
         (Hive.createdTime hiveCase)))
   p_ $ h2_ $ toHtml humanName
   p_ $ toHtml $ aggregateDescription esData
-  -- p_ $ hyperlinkToTraceId traceIdentifier
+  let traceIds = incidentToEventId <$> esData
+      times = incidentToTime <$> esData
+      start = Timespan (-7_200_000_000_000) `Torsor.add` minimum times
+      end = Timespan 7_200_000_000_000 `Torsor.add` maximum times
+      url = kibanaTemplate kibanaIndexPattern (start, end) traceIds
+  p_ $ a_ [ href_ $ TS.toText url ] "View Incidents in Kibana"
+  -- TODO port the zero-case handling in
   -- case kibanaIndexPattern of
   --   0 -> p_ $ hyperlinkToRelevant allEventsUuid created traceIdentifier
   --   pat -> p_ $ hyperlinkToRelevant pat created traceIdentifier
@@ -213,7 +232,6 @@ mkBody
         esAttr es ["trace", "id"]
         esAttr es ["url", "domains"]
         esAttr es ["url", "domains_count"]
-
   -- case List.find (\(Notification{id}) -> id == ruleId) notifications of
   --   Nothing -> pure ()
   --   Just Notification{playbooks,suggestedActions,referenceLinks} -> p_ $ do
@@ -233,14 +251,88 @@ mkBody
   esAttr es path = do
     maybeM_ (delve es ("_source":path)) $ jsonAsHtml (T.intercalate "." path)
 
+incidentToEventId :: Json.Value -> Word128
+incidentToEventId inc = delve inc ["_source", "trace", "id"] & \case
+  Nothing -> error "incident has no trace id"
+  Just rawId -> Json.parseEither parseJSON rawId & \case
+    Left err -> error $ "ill-typed incident trace id: " ++ err
+    Right id -> Base62.decode128 (Bytes.fromAsciiString id) & \case
+      Nothing -> error "malformed incident trace id"
+      Just it -> it
 
+incidentToTime :: Json.Value -> Time
+incidentToTime inc = fromJSON <$> delve inc ["_source", "event", "created"]
+  & \case
+    Nothing -> error "incident has no event.created"
+    Just (Json.Success str) ->
+      T.encodeUtf8 str
+      & Chronos.decodeUtf8_YmdHMS Chronos.w3c
+      & \case
+        Nothing -> error "malformed incident event.created"
+        Just it -> Chronos.datetimeToTime it
+    Just _ -> error $ "malformed incident trace id"
 
-instance Json.FromJSON ShortText where
+encodeKibanaUrlTime :: Time -> ShortText
+encodeKibanaUrlTime t = case TS.fromByteString b of
+  Nothing -> errorWithoutStackTrace "Allsight.Notification.encodeKibanaUrlTime: implementation mistake"
+  Just r -> r
+  where
+  b = Chronos.encodeUtf8_YmdHMS (Chronos.SubsecondPrecisionFixed 3) Chronos.w3c
+    $ Chronos.timeToDatetime
+    $ t
+
+kibanaTemplate :: Word128 -> (Time, Time) -> [Word128] -> ShortText
+kibanaTemplate indexPattern (start, end) eventIds = TS.filter (/= ' ') $
+  "https://dashboard.layer3com.com/s/allsight/app/kibana#\
+    \/discover/10fd50f0-0735-11eb-9ff7-e9ef8c9367f7\
+    \?_g=\
+      \( filters: !()\
+      \, refreshInterval: (pause: !t, value: 0)\
+      \, time: \
+        \( from: '" <> encodeKibanaUrlTime start <> "Z'\
+        \, to: '" <> encodeKibanaUrlTime end <> "Z')\
+      \)\
+    \&_a=\
+      \( filters: \
+        \!(( '$state': (store: appState)\
+          \, meta: \
+            \( alias: !n\
+            \, disabled: !f\
+            \, index: e064c1b0-e616-11ea-9ff7-e9ef8c9367f7\
+            \, key: event.ids\
+            \, negate: !f\
+            \, params: !('" <> TS.intercalate "','" encodedIds <> "')\
+            \, type: phrases\
+            \, value: '" <> TS.intercalate ",%20" encodedIds <> "'\
+            \)\
+          \, query: \
+            \( bool: \
+              \( minimum_should_match: 1\
+              \, should: \
+                \!("
+                  <> (TS.intercalate "," $
+                    flip map encodedIds $ \encId ->
+                      "(match_phrase: (event.ids: '" <> encId <> "'))"
+                  ) <>
+                ")\
+              \)\
+            \)\
+          \)\
+        \)\
+      \, index: '" <> (ba2st . UUID.encodeHyphenated) indexPattern <> "'\
+      \, interval: auto\
+      \)\
+  \"
+  where
+  encodedIds :: [ShortText]
+  encodedIds = (ba2st . Base62.encode128 ) <$> eventIds
+
+instance FromJSON ShortText where
   parseJSON = (TS.fromText <$>) . Json.parseJSON
 
 
 newtype SfId = SfId Text
-instance Json.FromJSON SfId where
+instance FromJSON SfId where
   parseJSON = withObject "salesforce response" $ \v -> do
     SfId <$> v .: "id"
 
@@ -283,7 +375,7 @@ data Customer = Customer
   -- , email :: !Text
   -- , severity :: !Int64
   -- , contacts :: !Contacts
-  -- , kibanaIndexPattern :: {-# UNPACK #-} !Word128
+  , kibanaIndexPattern :: {-# UNPACK #-} !Word128
   }
 
 instance FromJSON Customer where
@@ -291,12 +383,14 @@ instance FromJSON Customer where
     id <- v .: "id"
     sfAccountId <- v .: "salesforce_account_id"
     name <- v .: "name"
-    pure Customer{id,sfAccountId,name}
+    kibanaIndexPattern <- (v .: "kibana_index_pattern") >>= \str ->
+      case UUID.decodeHyphenated (Bytes.fromShortByteString (TS.toShortByteString (TS.fromText str))) of
+        Nothing -> fail "kibana_index_pattern should be a UUID"
+        Just it -> pure it
+    pure Customer{id,sfAccountId,name,kibanaIndexPattern}
     -- email <- v .: "email"
     -- severity <- v .: "severity"
     -- contacts <- v .: "contacts"
-    -- kibanaIndexPattern' <- v .: "kibana_index_pattern"
-    -- case UUID.decodeHyphenated (Bytes.fromShortByteString (TS.toShortByteString (TS.fromText kibanaIndexPattern'))) of
-    --   Nothing -> fail "kibana_index_pattern should be a UUID"
-    --   Just kibanaIndexPattern -> pure Customer
-    --     { id , name , email , severity , contacts , kibanaIndexPattern }
+
+ba2st :: ByteArray -> ShortText
+ba2st (ByteArray x) = TS.fromShortByteStringUnsafe (SBS x)
