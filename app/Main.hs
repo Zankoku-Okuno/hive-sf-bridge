@@ -13,7 +13,7 @@ import Control.Applicative ((<**>), optional)
 import Control.Monad (when, forM)
 import Data.Aeson (toJSON)
 import Data.Functor ((<&>))
-import TheHive.CortexUtils (Operation(AddTagToCase))
+import TheHive.CortexUtils (Operation(..))
 import Marshall (Customer(..), allsight)
 import System.Exit (exitSuccess)
 
@@ -110,9 +110,13 @@ main = do
     --   obj <- Json.decode @Json.Object (Http.responseBody response)
     --   HMap.lookup "id" obj >>= fromText
 
+    let sfLink = "https://layer3.lightning.force.com/lightning/r/Case/" <> sfId <> "/view"
     pure . Right $ Hive.SuccessResponse
       { message = "Salesforce case ID is: " <> sfId
-      , operations = [ AddTagToCase sfId ]
+      , operations =
+          [ AddTagToCase "sfbridge"
+          , AddCustomField "salesforce-link" sfLink
+          ]
       }
 
 

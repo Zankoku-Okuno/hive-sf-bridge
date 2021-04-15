@@ -37,6 +37,10 @@ data Response
 
 data Operation
   = AddTagToCase Text
+  | AddCustomField
+    { key :: Text
+    , value :: Text -- FIXME other possible return types
+    }
   -- TODO more operations available at https://github.com/TheHive-Project/CortexDocs/blob/7e366670c727ad57042174c180033856ef1dc6ba/api/how-to-create-a-responder.md#output
 
 type Responder customFields
@@ -104,4 +108,14 @@ instance ToJSON Operation where
   toJSON (AddTagToCase tag) = Json.object
     [ "type" .= ("AddTagToCase" :: Json.Value)
     , "tag" .= toJSON tag
+    ]
+  toJSON (AddCustomField k v) = Json.object
+    [ "type" .= toJSON ("AddCustomFields" :: Text)
+    -- No, it's not a mistake. Check out this example responder:
+    -- https://github.com/TheHive-Project/Cortex-Analyzers/blob/0ef35dfab1314616e6b7ab2fc01240581aa11ba4/responders/RT4/rt4.py#L151
+    -- Why not `fieldType`? I guess we'll never know…
+    -- Similarly, why pluralize `AddCustomFields` when only one custom field gets added? smh
+    , "tpe" .= toJSON ("string" :: Text)
+    , "key" .= toJSON k
+    , "value" .= toJSON v
     ]
