@@ -119,10 +119,14 @@ instance FromJSON AlertCustomFields where
 sfCaseFromHive :: Customer -> Hive.Case Json.Value -> [Json.Value] -> Json.Value
 sfCaseFromHive
     cust@Customer{sfAccountId}
-    hiveCase@Case{caseNum,hiveId,title,severity}
+    hiveCase@Case{hiveId,title,severity}
     esData
   = Json.object
-    [ ("Subject", toJSON $ "Hive Case " ++ show caseNum)
+    [ ("Subject", toJSON $ T.concat
+        [ name cust <> " Security Alert: "
+        , title
+        ]
+      )
     , ("Hive_Case__c", toJSON hiveLink)
     , ("Origin", "Layer 3 Alert")
     , ("AccountId", toJSON sfAccountId)
@@ -141,7 +145,6 @@ sfCaseFromHive
   hiveLink = "https://hive.noc.layer3com.com/index.html#!/case/~" <> hiveId <> "/details"
   ruleId = delve (head esData) ["_source", "incident", "id"]
   traceId = delve (head esData) ["_source", "trace", "id"]
-
 
 aggregateDescription :: [Json.Value] -> Text
 aggregateDescription esData = T.intercalate "\n\n" $ List.nub . catMaybes $
