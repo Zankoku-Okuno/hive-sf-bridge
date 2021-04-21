@@ -115,7 +115,7 @@ main = do
       { message = "Salesforce case ID is: " <> sfId
       , operations =
           [ AddTagToCase "sfbridge"
-          , AddCustomField "salesforce-link" sfLink
+          -- , AddCustomField "salesforce-link" sfLink
           ]
       }
 
