@@ -116,6 +116,6 @@ instance ToJSON Operation where
     -- Why not `fieldType`? I guess we'll never know…
     -- Similarly, why pluralize `AddCustomFields` when only one custom field gets added? smh
     , "tpe" .= toJSON ("string" :: Text)
-    , "key" .= toJSON k
+    , "name" .= toJSON k
     , "value" .= toJSON v
     ]
